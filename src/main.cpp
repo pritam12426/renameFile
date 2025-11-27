@@ -3,6 +3,8 @@
 #include <argparse/argparse.hpp>
 #include <cstdlib>
 #include <filesystem>
+#include <string>
+#include <vector>
 
 #include "CmakeConfig.h"
 #include "functions.hpp"
@@ -16,32 +18,123 @@ namespace env {
 	fs::path pwd;
 };  // namespace env
 
+std::vector<std::string> IGNORE_PATH({
+	".git",
+    ".gitignore",
+    "CMakeCache.txt",
+    "CMakeLists.txt"
+});
+
 int main(const int argc, const char *const argv[]) {
+	// Get environment variables with logging
+	if (char *GET_ENV = std::getenv("HOME"); GET_ENV != nullptr) {
+		env::home = GET_ENV;
+	} else {
+		spdlog::error("HOME environment variable is not set.");
+		return 1;
+	}
+
+	if (char *GET_ENV = std::getenv("USER"); GET_ENV != nullptr) {
+		env::user = GET_ENV;
+	} else {
+		spdlog::error("USER environment variable is not set.");
+		return 1;
+	}
+
+	if (char *GET_ENV = std::getenv("PWD"); GET_ENV != nullptr) {
+		env::pwd = GET_ENV;
+	} else {
+		spdlog::error("PWD environment variable is not set.");
+		return 1;
+	}
+
 	argparse::ArgumentParser program(PROJECT_NAME, PROJECT_VERSION);
 
-	env::home = std::getenv("HOME");
-	env::user = std::getenv("USER");
-	env::pwd  = std::getenv("PWD");
+	program.add_argument("--no-verbose", "-V")
+	    .help("Disable verbose output (default is verbose)")
+	    .default_value(false)
+	    .implicit_value(true);
+
+	program.add_argument("--force", "-F")
+	    .help("Work with home user folder")
+	    .default_value(false)
+	    .implicit_value(true);
+
+	program.add_argument("--summary", "-s")
+	    .help("Printout, the summarise output")
+	    .default_value(false)
+	    .implicit_value(true);
+
+	program.add_argument("--dry-run", "-n")
+	    .help("Perform a trial run with no changes made")
+	    .default_value(false)
+	    .implicit_value(true);
+
+	program.add_argument("--ignore", "-i")
+	    .help("Ignore specific names (like build, .cache, etc.)")
+	    .default_value(IGNORE_PATH)
+	    .append();
+
+	// Parse arguments
+	try {
+		program.parse_args(argc, argv);
+	} catch (const std::exception &e) {
+		std::cerr << e.what() << '\n';
+		return 1;  // Exit with error code
+	}
+
+	// Now merge defaults + user input
+	{
+		auto user_ignores = program.get<std::vector<std::string>>("--ignore");
+		IGNORE_PATH.insert(IGNORE_PATH.end(),
+		                   user_ignores.begin(),
+		                   user_ignores.end());
+	}
+
 
 	for (int i = 1; i < argc; i++) {
-		fs::path abs_path(fs::absolute(argv[i]));
+		fs::path const original_abs_path(fs::absolute(argv[i]));
 
-		if (!fs::exists(abs_path)) {
-			spdlog::error("This is home dir {} ", abs_path.filename().c_str());
+		if (!fs::exists(original_abs_path)) {
+			spdlog::warn("File not exist ", original_abs_path.filename().c_str());
 			continue;
 		}
 
-		if (abs_path.parent_path() == env::home) {
-			// if (log) {
-			spdlog::error("This is home dir {} ", abs_path.filename().c_str());
-			// }
+		if (original_abs_path.parent_path() == env::home) {
+			if (!program.get<bool>("--force")) {
+				spdlog::info("This is home dir {} ", original_abs_path.parent_path().c_str());
+				continue;
+			}
+		}
+
+		fs::path original_dir_name(original_abs_path.parent_path());
+		fs::path original_file_name(original_abs_path.filename());
+		fs::path new_file_name = original_file_name;
+
+		bool ignore = false;
+		for (const auto &i : IGNORE_PATH) {
+			if (original_file_name == i) {
+				spdlog::warn("Ignore this file {} ", original_file_name.c_str());
+				ignore = true;
+				break;
+			}
+		}
+		if (ignore) {
 			continue;
 		}
 
-		if (fs::is_regular_file(abs_path)) {
-			std::cout << "It is a file\n";
-		} else if (fs::is_directory(abs_path)) {
-			std::cout << "It is a directory\n";
+		if (Fun::formatPathName(new_file_name)) {
+			fs::path new_abs_path = original_dir_name / new_file_name;
+
+			if (program.get<bool>("--dry-run")) {
+				spdlog::info("[DRY] Would rename {} -> {}", original_abs_path.c_str(),new_abs_path.c_str());
+			} else {
+				if (original_abs_path != new_abs_path) {
+					fs::rename(original_abs_path, new_abs_path);
+					if (!program.get<bool>("--no-verbose"))
+						spdlog::info("Renamed {} -> {}", original_abs_path.c_str(), new_abs_path.c_str());
+				}
+			}
 		}
 	}
 

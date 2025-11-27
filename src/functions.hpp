@@ -2,11 +2,14 @@
 #define _FUNCTIONS_HPP_
 
 
+#include <filesystem>
+
+namespace fs = std::filesystem;
+
 namespace Fun {
 
 
-int add(int x, int y);
-
+bool formatPathName(fs::path &newString);
 
 }  // namespace Fun
 

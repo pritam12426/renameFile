@@ -4,7 +4,7 @@
 		"command": "cmake",
 		"args": [
 			"--build build-arm64",
-			"--target run"
+			// "--target run"
 		],
 		"show_command": false,
 		"shell": {

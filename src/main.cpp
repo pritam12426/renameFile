@@ -3,6 +3,7 @@
 #include <argparse/argparse.hpp>
 #include <cstdlib>
 #include <filesystem>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -18,12 +19,8 @@ namespace env {
 	fs::path pwd;
 };  // namespace env
 
-std::vector<std::string> IGNORE_PATH({
-	".git",
-    ".gitignore",
-    "CMakeCache.txt",
-    "CMakeLists.txt"
-});
+std::vector<std::string> IGNORE_PATH(
+    { ".git", ".gitignore", "CMakeCache.txt", "CMakeLists.txt" });
 
 int main(const int argc, const char *const argv[]) {
 	// Get environment variables with logging
@@ -50,12 +47,12 @@ int main(const int argc, const char *const argv[]) {
 
 	argparse::ArgumentParser program(PROJECT_NAME, PROJECT_VERSION);
 
-	program.add_argument("--no-verbose", "-V")
+	program.add_argument("--no-log", "-l")
 	    .help("Disable verbose output (default is verbose)")
 	    .default_value(false)
 	    .implicit_value(true);
 
-	program.add_argument("--force", "-F")
+	program.add_argument("--force", "-s")
 	    .help("Work with home user folder")
 	    .default_value(false)
 	    .implicit_value(true);
@@ -67,8 +64,8 @@ int main(const int argc, const char *const argv[]) {
 
 	program.add_argument("--dry-run", "-n")
 	    .help("Perform a trial run with no changes made")
-	    .default_value(false)
-	    .implicit_value(true);
+	    .default_value(true)
+	    .implicit_value(false);
 
 	program.add_argument("--ignore", "-i")
 	    .help("Ignore specific names (like build, .cache, etc.)")
@@ -77,6 +74,7 @@ int main(const int argc, const char *const argv[]) {
 
 	program.add_argument("files")
 	    .help("List of files to rename")
+	    .default_value("-=-=-=-")
 	    .remaining();
 
 	// Parse arguments
@@ -87,34 +85,40 @@ int main(const int argc, const char *const argv[]) {
 		return 1;  // Exit with error code
 	}
 
+	std::vector<std::string> files;
+	try {
+		files = program.get<std::vector<std::string>>("files");
+	} catch (const std::bad_any_cast &e) {
+		std::cerr << "Error: Unexpected argument type." << std::endl;
+        std::cerr << "       " << e.what() << std::endl;
+		std::cerr << "==============================\n";
+		std::cerr << program.help().str();
+		return 1;
+	}
+
 	// Now merge defaults + user input
 	{
 		auto user_ignores = program.get<std::vector<std::string>>("--ignore");
-		IGNORE_PATH.insert(IGNORE_PATH.end(),
-		                   user_ignores.begin(),
-		                   user_ignores.end());
+		IGNORE_PATH.insert(IGNORE_PATH.end(), user_ignores.begin(), user_ignores.end());
 	}
 
-	struct RenameLog {
-		fs::path original_path;
-		fs::path new_path;
-	};
-
-	std::vector<RenameLog> rename_logs;
-
-	auto files = program.get<std::vector<std::string>>("files");
 
 	for (const auto &file : files) {
 		fs::path const original_abs_path(fs::absolute(file));
 
 		if (!fs::exists(original_abs_path)) {
-			spdlog::warn("File not exist ", original_abs_path.filename().c_str());
+			spdlog::warn("File not exist \"{}\"", original_abs_path.filename().c_str());
+			continue;
+		}
+
+		if (original_abs_path.filename().string().starts_with(".")) {
+			spdlog::warn("Not meant for working with hidden files and folder :: \"{}\"", original_abs_path.filename().c_str());
 			continue;
 		}
 
 		if (original_abs_path.parent_path() == env::home) {
 			if (!program.get<bool>("--force")) {
-				spdlog::info("This is home dir {} ", original_abs_path.parent_path().c_str());
+				spdlog::warn("Skipping: Part of home directory :: \"{}\"", original_abs_path.filename().c_str());
 				continue;
 			}
 		}
@@ -126,7 +130,7 @@ int main(const int argc, const char *const argv[]) {
 		bool ignore = false;
 		for (const auto &i : IGNORE_PATH) {
 			if (original_file_name == i) {
-				spdlog::warn("Ignore this file {} ", original_file_name.c_str());
+				spdlog::warn("Ignore this file \"{}\"", original_file_name.filename().c_str());
 				ignore = true;
 				break;
 			}
@@ -135,34 +139,29 @@ int main(const int argc, const char *const argv[]) {
 			continue;
 		}
 
+		// Done till here
+
 		if (Fun::formatPathName(new_file_name)) {
+			// TODO: get back the file Extensions
 			fs::path new_abs_path = original_dir_name / new_file_name;
 
+			if (original_abs_path == new_abs_path) continue;
+
 			if (program.get<bool>("--dry-run")) {
-				spdlog::info("[DRY] Would rename {} -> {}", original_abs_path.c_str(),new_abs_path.c_str());
-				if (original_abs_path != new_abs_path) {
-					rename_logs.push_back({original_abs_path, new_abs_path});
-				}
+				spdlog::info("[DRY] Would rename \"{}\" -> \"{}\"", original_abs_path.filename().c_str(), new_abs_path.filename().c_str());
 			} else {
-				if (original_abs_path != new_abs_path) {
-					fs::rename(original_abs_path, new_abs_path.c_str());
-					if (!program.get<bool>("--no-verbose"))
-						spdlog::info("Renamed {} -> {}", original_abs_path.c_str(), new_abs_path.c_str());
-					rename_logs.push_back({original_abs_path, new_abs_path});
+				fs::rename(original_abs_path, new_abs_path.c_str());
+				if (!program.get<bool>("--no-log")) {
+					spdlog::info("Renamed \"{}\" -> \"{}\"", original_abs_path.filename().c_str(), new_abs_path.filename().c_str());
 				}
 			}
+
+			// TODO: add logoc for add data for summary
 		}
 	}
 
 	if (program.get<bool>("--summary")) {
-		if (rename_logs.empty()) {
-			spdlog::info("No files were renamed.");
-		} else {
-			spdlog::info("Summary of renamed files:");
-			for (const auto &log : rename_logs) {
-				spdlog::info("  {} -> {}", log.original_path.c_str(), log.new_path.c_str());
-			}
-		}
+		//
 	}
 
 	return 0;

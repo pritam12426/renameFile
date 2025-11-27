@@ -75,6 +75,10 @@ int main(const int argc, const char *const argv[]) {
 	    .default_value(IGNORE_PATH)
 	    .append();
 
+	program.add_argument("files")
+	    .help("List of files to rename")
+	    .remaining();
+
 	// Parse arguments
 	try {
 		program.parse_args(argc, argv);
@@ -91,9 +95,17 @@ int main(const int argc, const char *const argv[]) {
 		                   user_ignores.end());
 	}
 
+	struct RenameLog {
+		fs::path original_path;
+		fs::path new_path;
+	};
 
-	for (int i = 1; i < argc; i++) {
-		fs::path const original_abs_path(fs::absolute(argv[i]));
+	std::vector<RenameLog> rename_logs;
+
+	auto files = program.get<std::vector<std::string>>("files");
+
+	for (const auto &file : files) {
+		fs::path const original_abs_path(fs::absolute(file));
 
 		if (!fs::exists(original_abs_path)) {
 			spdlog::warn("File not exist ", original_abs_path.filename().c_str());
@@ -128,12 +140,27 @@ int main(const int argc, const char *const argv[]) {
 
 			if (program.get<bool>("--dry-run")) {
 				spdlog::info("[DRY] Would rename {} -> {}", original_abs_path.c_str(),new_abs_path.c_str());
+				if (original_abs_path != new_abs_path) {
+					rename_logs.push_back({original_abs_path, new_abs_path});
+				}
 			} else {
 				if (original_abs_path != new_abs_path) {
-					fs::rename(original_abs_path, new_abs_path);
+					fs::rename(original_abs_path, new_abs_path.c_str());
 					if (!program.get<bool>("--no-verbose"))
 						spdlog::info("Renamed {} -> {}", original_abs_path.c_str(), new_abs_path.c_str());
+					rename_logs.push_back({original_abs_path, new_abs_path});
 				}
+			}
+		}
+	}
+
+	if (program.get<bool>("--summary")) {
+		if (rename_logs.empty()) {
+			spdlog::info("No files were renamed.");
+		} else {
+			spdlog::info("Summary of renamed files:");
+			for (const auto &log : rename_logs) {
+				spdlog::info("  {} -> {}", log.original_path.c_str(), log.new_path.c_str());
 			}
 		}
 	}

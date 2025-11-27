@@ -9,7 +9,7 @@ static inline std::string escapeRegex(char c) {
 	                                               : std::string(1, c);
 }
 
-bool formatPathName(fs::path &newString) {
+bool Fun::formatPathName(fs::path &newString) {
 	// Convert char8_t* → char safely (no UB)
 	std::u8string u8s = newString.u8string();
 	std::string s(reinterpret_cast<const char *>(u8s.c_str()));

@@ -64,8 +64,8 @@ int main(const int argc, const char *const argv[]) {
 
 	program.add_argument("--dry-run", "-n")
 	    .help("Perform a trial run with no changes made")
-	    .default_value(true)
-	    .implicit_value(false);
+	    .default_value(false)
+	    .implicit_value(true);
 
 	program.add_argument("--ignore", "-i")
 	    .help("Ignore specific names (like build, .cache, etc.)")
@@ -150,7 +150,7 @@ int main(const int argc, const char *const argv[]) {
 			if (program.get<bool>("--dry-run")) {
 				spdlog::info("[DRY] Would rename \"{}\" -> \"{}\"", original_abs_path.filename().c_str(), new_abs_path.filename().c_str());
 			} else {
-				fs::rename(original_abs_path, new_abs_path.c_str());
+				// fs::rename(original_abs_path, new_abs_path);
 				if (!program.get<bool>("--no-log")) {
 					spdlog::info("Renamed \"{}\" -> \"{}\"", original_abs_path.filename().c_str(), new_abs_path.filename().c_str());
 				}
